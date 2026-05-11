@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -fsanitize=address,undefined CMakeFiles/test_timer.dir/test_timer.cpp.o -o test_timer  ../libtimer_lib.a ../lib/libgtest_main.a ../lib/libgtest.a 

@@ -1,0 +1,2 @@
+add_executable(bench_timer bench_timer.cpp)
+target_link_libraries(bench_timer PRIVATE timer_lib)

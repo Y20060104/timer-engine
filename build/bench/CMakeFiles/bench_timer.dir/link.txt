@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -fsanitize=address,undefined CMakeFiles/bench_timer.dir/bench_timer.cpp.o -o bench_timer  ../libtimer_lib.a 
