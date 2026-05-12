@@ -13,10 +13,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 # 把src暴露为库，test和bench都能用
-add_library(timer_lib STATIC
-    src/timer_wheel.cpp
-)
-target_include_directories(timer_lib PUBLIC src)
+add_library(timer_lib INTERFACE)
+target_include_directories(timer_lib INTERFACE src)
+
 
 add_subdirectory(test)
 add_subdirectory(bench)

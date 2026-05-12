@@ -1,3 +1,56 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 构建与运行
+
+```bash
+# 运行测试（Debug + ASan）
+./run_tests.sh
+
+# 手动构建
+cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j$(nproc)
+
+# 运行单个测试
+cd build && ./test/test_timer --gtest_filter="TimerWheel.NormalFire"
+
+# Benchmark（Release + O2）
+./run_bench.sh
+
+# 格式化
+./format.sh
+```
+
+Debug 构建自动启用 `-fsanitize=address,undefined`。
+
+## 项目架构
+
+三级时间轮定时器（hierarchical timer wheel），C++23，CMake 构建。
+
+```
+src/timer_wheel.h    — Timer 结构体 + TimerWheel 类声明
+src/timer_wheel.cpp  — TimerWheel 实现（add / cancel / tick / cascade）
+src/timer_pool.h     — TimerPool<N> 模板，预分配 N 个 Timer 复用（header-only）
+test/test_timer.cpp  — gtest 测试用例
+bench/bench_timer.cpp — TimerWheel vs NaiveTimerHeap 对比 benchmark
+```
+
+**核心数据结构**：侵入式双向链表 + 三级固定数组槽位（256/64/16），每个槽是一个链表头指针。
+
+**tick 执行顺序**：先 tick+1 → 先 cascade 降级 → 再处理当前槽。顺序不能颠倒，否则边界定时器延迟一圈。
+
+**槽位映射**：L1 覆盖 0-255（expire & 255），L2 覆盖 256-16383（(expire>>8) & 63），L3 覆盖 16384-262143（(expire>>14) & 15）。
+
+详细设计决策和面试准备见 [TIMER_WHEEL_SUMMARY.md](TIMER_WHEEL_SUMMARY.md)。
+
+## 依赖
+
+- CMake 3.20+, C++23 编译器
+- Google Test（CMake FetchContent 自动下载，v1.14.0）
+- clang-format（仅格式化脚本需要）
+
+---
+
 # 学习引导约束
 
 用户正在通过实现C++项目来学习底层技术。

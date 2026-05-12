@@ -1,4 +1,5 @@
 #include "timer_wheel.h"
+#include "timer_pool.h"
 #include <chrono> 
 
 
@@ -10,8 +11,12 @@
 #include <vector>
 
 
-using Clock = std::chrono::steady_clock;
-using NS = std::chrono::nanoseconds;
+struct HeapAlloc {
+    Timer* allocate(){
+       return new Timer;
+    }
+    void deallocate(Timer* t){delete t;}   // delete t
+};
 
 // ========== 朴素方案：最小堆 ==========
 
@@ -53,7 +58,7 @@ int getRandomNumber(){
     return dist(gen);
 }
 
-void bench_add(TimerWheel& wheel,NaiveTimerHeap& th){
+void bench_add(TimerWheel<HeapAlloc>& wheel,NaiveTimerHeap& th,TimerWheel<TimerPool<1100000>>&pool_wheel){
     uint64_t fired_count = 0;
     auto tw_cb = [&fired_count]{ ++fired_count; };
     auto start=std::chrono::steady_clock::now();
@@ -62,7 +67,7 @@ void bench_add(TimerWheel& wheel,NaiveTimerHeap& th){
     }
     auto end=std::chrono::steady_clock::now();
     auto elapsed_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(end-start).count();
-    std::cout<<"[TimerWheel ] add 1000000 timers: "<<elapsed_ns <<  " ns , avg: "<<elapsed_ns/1000000<<"ns\n";
+    std::cout<<"[TimerWheel HeapAlloc] add 1000000 timers: "<<elapsed_ns <<  " ns , avg: "<<elapsed_ns/1000000<<"ns\n";
 
      uint64_t fired_count_2 = 0;
     auto cb = [&fired_count_2]{ ++fired_count_2; };
@@ -72,10 +77,21 @@ void bench_add(TimerWheel& wheel,NaiveTimerHeap& th){
     }
     auto end_2=std::chrono::steady_clock::now();
     auto elapsed_ns_2=std::chrono::duration_cast<std::chrono::nanoseconds>(end_2-start_2).count();
-    std::cout<<"[NaiveHeap  ] add 1000000 timers: "<<elapsed_ns_2 << " ns , avg: "<<elapsed_ns_2/1000000<<"ns\n";
+    std::cout<<"[NaiveHeap           ] add 1000000 timers: "<<elapsed_ns_2 << " ns , avg: "<<elapsed_ns_2/1000000<<"ns\n";
+
+     uint64_t fired_count_3 = 0;
+    auto ptw_cb = [&fired_count_3]{ ++fired_count_3; };
+    auto start_3=std::chrono::steady_clock::now();
+    for(int i=0;i<1000000;++i){
+        pool_wheel.add(getRandomNumber(),ptw_cb);
+    }
+    auto end_3=std::chrono::steady_clock::now();
+    auto elapsed_ns_3=std::chrono::duration_cast<std::chrono::nanoseconds>(end_3-start_3).count();
+    std::cout<<"[TimerWheel TimerPool] add 1000000 timers: "<<elapsed_ns_3 <<  " ns , avg: "<<elapsed_ns_3/1000000<<"ns\n";
+
 }
 
-void bench_tick(TimerWheel& wheel,NaiveTimerHeap& th){
+void bench_tick(TimerWheel<HeapAlloc>& wheel,NaiveTimerHeap& th,TimerWheel<TimerPool<1100000>>&pool_wheel){
 uint64_t fired_count = 0;
     auto tw_cb = [&fired_count]{ ++fired_count; };
    
@@ -88,8 +104,7 @@ uint64_t fired_count = 0;
     }
     auto end=std::chrono::steady_clock::now();
     auto elapsed_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(end-start).count();
-    std::cout<<"[TimerWheel ] tick 1000000 timers: "<<elapsed_ns <<  " ns , avg: "<<elapsed_ns/1000000<<"ns\n";
-
+    std::cout<<"[TimerWheel HeapAlloc] tick 1000000 timers: "<<elapsed_ns <<  " ns , avg: "<<elapsed_ns/1000000<<"ns\n";
      uint64_t fired_count_2 = 0;
     auto cb = [&fired_count_2]{ ++fired_count_2; };
     
@@ -102,19 +117,36 @@ uint64_t fired_count = 0;
     }
     auto end_2=std::chrono::steady_clock::now();
     auto elapsed_ns_2=std::chrono::duration_cast<std::chrono::nanoseconds>(end_2-start_2).count();
-    std::cout<<"[NaiveHeap  ] tick 1000000 timers: "<<elapsed_ns_2 << " ns , avg: "<<elapsed_ns_2/1000000<<"ns\n";
+     std::cout<<"[NaiveHeap           ] tick 1000000 timers: "<<elapsed_ns_2 << " ns , avg: "<<elapsed_ns_2/1000000<<"ns\n";
+
+    uint64_t fired_count_3 = 0;
+    auto ptw_cb = [&fired_count_3]{ ++fired_count_3; };
+    
+    for(int i=0;i<1000000;++i){
+        pool_wheel.add(17000,ptw_cb);
+    }
+    auto start_3=std::chrono::steady_clock::now();
+      for(int i=0;i<17000;++i){
+        pool_wheel.tick();
+    }
+    auto end_3=std::chrono::steady_clock::now();
+    auto elapsed_ns_3=std::chrono::duration_cast<std::chrono::nanoseconds>(end_3-start_3).count();
+    std::cout<<"[TimerWheel TimerPool] tick 1000000 timers: "<<elapsed_ns_3 <<  " ns , avg: "<<elapsed_ns_3/1000000<<"ns\n";
+
 }
 
 
 
 int main()
 {
-    TimerWheel wheel;
+    TimerWheel<HeapAlloc> wheel;
     NaiveTimerHeap th;
+    TimerWheel<TimerPool<1100000>> pool_wheel;
     std::cout<<"插入100万定时器 [TimerWheel ] 对比 [NaiveHeap  ]...\n";
-    bench_add(wheel,th);
+    bench_add(wheel,th,pool_wheel);
     std::cout<<"100万定时器同时到期 [TimerWheel ] 对比 [NaiveHeap  ]...\n";
-    TimerWheel wheel_2;
+    TimerWheel<HeapAlloc> wheel_2;
     NaiveTimerHeap th_2;
-    bench_tick(wheel_2,th_2);
+    TimerWheel<TimerPool<1100000>> pool_wheel_2;
+    bench_tick(wheel_2,th_2,pool_wheel_2);
 }
