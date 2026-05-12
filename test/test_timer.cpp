@@ -2,10 +2,8 @@
 #include <gtest/gtest.h>
 
 struct HeapAlloc {
-    Timer* allocate(){
-       return new Timer;
-    }
-    void deallocate(Timer* t){delete t;}   // delete t
+  Timer *allocate() { return new Timer; }
+  void deallocate(Timer *t) { delete t; } // delete t
 };
 
 // 正常运行
