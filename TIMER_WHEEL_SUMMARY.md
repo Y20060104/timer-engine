@@ -20,9 +20,12 @@ struct Timer {
     bool      cancelled_;
 };
 
+template<typename Alloc>
 class TimerWheel {
 public:
-    TimerWheel() : slots_l1_{}, slots_l2_{}, slots_l3_{}, current_tick_(0) {}
+    TimerWheel(Alloc alloc = Alloc{})
+        : slots_l1_{}, slots_l2_{}, slots_l3_{}, current_tick_(0)
+        , alloc_(std::move(alloc)) {}
     Timer* add(uint64_t delay_ticks, std::function<void()> cb);
     void   cancel(Timer* t);
     void   tick();
@@ -38,10 +41,27 @@ private:
     Timer*   slots_l1_[SLOTS_LEVEL1];
     Timer*   slots_l2_[SLOTS_LEVEL2];
     Timer*   slots_l3_[SLOTS_LEVEL3];
-    uint64_t current_tick_;
 
-    void insert(Timer** slots, int slot, Timer* t);
-    void cascade(int level, int slot);
+    uint64_t current_tick_;
+    Alloc    alloc_;          // 编译期绑定，零调用开销
+};
+```
+
+### TimerPool（内存池）
+
+```cpp
+template<size_t N>
+class TimerPool {
+public:
+    TimerPool();                                       // new Timer[N]，链表串联
+    Timer* allocate();                                 // 头部取出，O(1)
+    void deallocate(Timer* t);                        // 头部归还，O(1)
+    TimerPool(const TimerPool&) = delete;             // 禁止拷贝（Rule of 3）
+    TimerPool(TimerPool&&) noexcept;                  // move 语义
+    TimerPool& operator=(TimerPool&&) noexcept;
+private:
+    Timer* pool_;       // 连续内存，cache-friendly
+    Timer* free_list;   // 单链表复用 next_ 指针
 };
 ```
 
@@ -73,10 +93,10 @@ private:
 
 ```cpp
 if((current_tick_ & SLOTS_LEVEL1_MASK) == 0) {
-    cascade(2, (current_tick_ >> 8)  & SLOTS_LEVEL2_MASK);
-    if(((current_tick_ >> 8) & SLOTS_LEVEL2_MASK) == 0) {
+    if((current_tick_ & SLOTS_LEVEL2_MASK) == 0) {
         cascade(3, (current_tick_ >> 14) & SLOTS_LEVEL3_MASK);
     }
+    cascade(2, (current_tick_ >> 8) & SLOTS_LEVEL2_MASK);
 }
 ```
 
@@ -86,13 +106,15 @@ if((current_tick_ & SLOTS_LEVEL1_MASK) == 0) {
 
 ```
 timer-engine/
-├── CLAUDE.md               # AI对话行为约束
-├── CMakeLists.txt          # 根目录构建配置
+├── CLAUDE.md               # AI对话行为约束 + 构建指引
+├── CMakeLists.txt          # 根目录构建配置（timer_lib 为 INTERFACE）
 ├── format.sh               # 代码格式化脚本
 ├── run_tests.sh            # 编译+运行测试脚本
+├── run_bench.sh            # Benchmark（Release + O2）
+├── TIMER_WHEEL_SUMMARY.md  # 设计文档（即本文件）
 ├── src/
-│   ├── timer_wheel.h
-│   └── timer_wheel.cpp
+│   ├── timer_wheel.h       # TimerWheel 模板（header-only）
+│   └── timer_pool.h        # TimerPool 模板（header-only）
 ├── test/
 │   ├── CMakeLists.txt
 │   └── test_timer.cpp
@@ -190,24 +212,35 @@ TimerWheel.ThirdFire          — delay=20000，第三级触发
 | 时间单位 | tick（非毫秒） | 整数运算，避免浮点和单位换算 |
 | 槽数 | 256/64/16 | 内存换时间，长延迟定时器数量少 |
 | cascade顺序 | 先cascade后触发 | 防止边界定时器延迟一圈 |
+| 分配器集成 | 模板参数 | 编译期绑定，零调用开销，不破坏 TimerWheel 内聚 |
+| 内存池 | 预分配+free list | 连续内存 cache-friendly，allocate/deallocate 均 O(1) |
+| 拷贝策略 | = delete | 禁拷贝，只保留 move，防止浅拷贝导致双释放 |
+
+---
+
+## Benchmark 实测数据（100万定时器）
+
+| 操作 | TimerWheel + HeapAlloc | TimerWheel + TimerPool | NaiveTimerHeap |
+|------|----------------------|------------------------|----------------|
+| add (avg/op) | 115ns | **26ns** | 112ns |
+| tick (avg/op) | 41ns | **31ns** | 117ns |
+
+**结论**：TimerPool 消除 add 热路径上的 malloc，add 延迟降低约 **4.4x**（115ns → 26ns）。
+tick 时 TimerWheel 均 O(1)，远快于堆的 O(log n)，堆排序开销在 tick 路径上差距最大（31ns vs 117ns，~3.8x）。
 
 ---
 
 ## 未来优化方向
 
+### 已完成 ✅
+
+1. **benchmark** — TimerWheel vs NaiveTimerHeap 对比，add 和 tick 两项数据
+2. **析构函数** — 遍历三级所有槽释放所有 Timer
+3. **内存池集成** — TimerPool 模板，预分配连续内存 + free list，add 延迟降低 4.4x
+
 ### 优先级高（下一步实现）
 
-**1. benchmark实现**
-- 对比朴素方案（遍历数组）vs 时间轮的性能差距
-- 测试场景：均匀分布100万定时器、集中到期10万定时器
-- 工具：`bench/bench_timer.cpp`，用`std::chrono`计时
-- 目标数据：每次tick耗时、每秒可处理定时器数量
-
-**2. 析构函数**
-- 当前`TimerWheel`销毁时，slots里残留的Timer不会被delete
-- 需要在析构函数里遍历三级所有槽，释放所有Timer
-
-**3. 线程安全**
+**4. 线程安全**
 - 当前实现是单线程的
 - 游戏服务器场景：IO线程add定时器，逻辑线程tick
 - 方案一：加mutex（简单，有锁竞争）
@@ -215,11 +248,6 @@ TimerWheel.ThirdFire          — delay=20000，第三级触发
 - 注意：加了线程安全后需要切换到TSan验证
 
 ### 优先级中（对标BQLog日志组件后集成）
-
-**4. 内存池集成**
-- 当前每次add都new，每次到期都delete，内存碎片严重
-- 方案：为Timer对象实现对象池，复用已释放的Timer内存
-- 预期收益：消除热路径上的malloc/free开销
 
 **5. 时间戳精度**
 - 当前tick由外部驱动，精度取决于调用方
@@ -266,6 +294,11 @@ Q: cascade会不会造成性能峰值？
 A: 会。第一级走完一圈时，第二级当前槽的所有定时器
    同时降级，是O(N)操作。
    缓解方案：限制单个槽的定时器数量上限。
+
+Q: TimerPool为什么比new/delete快？
+A: 预分配连续内存（cache-friendly），free list用侵入式单链表
+   复用next_指针，allocate/deallocate均O(1)无系统调用。
+   实测add延迟从115ns降到26ns（~4.4x）。
 
 Q: 如何保证线程安全？
 A: 当前单线程。多线程方案：
