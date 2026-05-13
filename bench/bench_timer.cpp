@@ -1,10 +1,6 @@
 #include "timer_pool.h"
 #include "timer_wheel.h"
 #include <chrono>
-#include <fstream>
-#include <sstream>
-#include <string>
-
 #include <functional>
 #include <iostream>
 #include <queue>
@@ -154,74 +150,8 @@ void bench_tick(TimerWheel<HeapAlloc> &wheel, NaiveTimerHeap &th,
             << " ns , avg: " << elapsed_ns_3 / 1000000 << "ns\n";
 }
 
-// 读取进程常驻内存 (VmRSS)，单位 MB
-static long GetVmRSSMB()
-{
-  std::ifstream f("/proc/self/status");
-  std::string line;
-  while (std::getline(f, line))
-  {
-    if (line.rfind("VmRSS:", 0) != 0)
-      continue;
-    // 行格式: "VmRSS:    12345 kB"，用 istringstream 跳过标签
-    std::istringstream iss(line);
-    std::string label;
-    long kb;
-    iss >> label >> kb;
-    return kb / 1024;
-  }
-  return -1;
-}
-
-// 百万定时器内存开销对比
-// HeapAlloc（按需 new/delete）vs TimerPool（预分配连续数组+union free list）
-void bench_mem()
-{
-  constexpr int kNumTimers = 1000000;
-  constexpr int kPoolSize = 1100000;
-  constexpr int kDelay = 17000;
-
-  std::cout << "\n========== 百万定时器内存开销对比 ==========\n";
-
-  // 注意：顺序敏感 —— 先跑内存更紧凑的一方，避免被对侧 malloc arena 残留污染。
-  // 每个 scope 结束后 wheel 析构，malloc 通常不归还页给 OS，所以 VmRSS 只升不降。
-
-  // ---------- TimerPool：预分配连续数组 ----------
-  long mem_before = GetVmRSSMB();
-  {
-    TimerWheel<TimerPool<kPoolSize>> wheel;
-    int fired = 0;
-    for (int i = 0; i < kNumTimers; ++i)
-      wheel.add(kDelay, [&fired] { ++fired; });
-    long mem_after_add = GetVmRSSMB();
-
-    for (int i = 0; i < kDelay; ++i)
-      wheel.tick();
-    std::cout << "[TimerPool 1M] mem: +" << (mem_after_add - mem_before) << " MB"
-              << " (pool=" << kPoolSize << ")\n";
-  }
-
-  // ---------- HeapAlloc：按需 new/delete ----------
-  mem_before = GetVmRSSMB();
-  {
-    TimerWheel<HeapAlloc> wheel;
-    int fired = 0;
-    for (int i = 0; i < kNumTimers; ++i)
-      wheel.add(kDelay, [&fired] { ++fired; });
-    long mem_after_add = GetVmRSSMB();
-
-    for (int i = 0; i < kDelay; ++i)
-      wheel.tick();
-    std::cout << "[HeapAlloc  1M] mem: +" << (mem_after_add - mem_before) << " MB\n";
-  }
-}
-
 int main()
 {
-  // 内存对比必须最先跑，避免前面的 bench_add/bench_tick 撑大
-  // glibc malloc arena 后再跑读数失真。
-  bench_mem();
-
   TimerWheel<HeapAlloc> wheel;
   NaiveTimerHeap th;
   TimerWheel<TimerPool<1100000>> pool_wheel;
