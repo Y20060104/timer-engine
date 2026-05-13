@@ -1,13 +1,15 @@
 #include "timer_wheel.h"
 #include <gtest/gtest.h>
 
-struct HeapAlloc {
+struct HeapAlloc
+{
   Timer *allocate() { return new Timer; }
   void deallocate(Timer *t) { delete t; } // delete t
 };
 
 // 正常运行
-TEST(TimerWheel, NormalFire) {
+TEST(TimerWheel, NormalFire)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   wheel.add(5, [&fired] { fired = true; });
@@ -17,7 +19,8 @@ TEST(TimerWheel, NormalFire) {
 }
 
 // 回绕正确检验（边界情况）
-TEST(TimerWheel, WrapAround) {
+TEST(TimerWheel, WrapAround)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   for (int i = 0; i < 250; ++i)
@@ -29,7 +32,8 @@ TEST(TimerWheel, WrapAround) {
 }
 
 // 取消定时器
-TEST(TimerWheel, CancelTimer) {
+TEST(TimerWheel, CancelTimer)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   Timer *t = wheel.add(10, [&fired] { fired = true; });
@@ -40,7 +44,8 @@ TEST(TimerWheel, CancelTimer) {
 }
 
 // 第二级触发
-TEST(TimerWheel, SecondFire) {
+TEST(TimerWheel, SecondFire)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   Timer *t = wheel.add(300, [&fired] { fired = true; });
@@ -50,7 +55,8 @@ TEST(TimerWheel, SecondFire) {
 }
 
 // 第二级降级触发
-TEST(TimerWheel, Second_DeLevel_Fire) {
+TEST(TimerWheel, Second_DeLevel_Fire)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   Timer *t = wheel.add(256, [&fired] { fired = true; });
@@ -60,7 +66,8 @@ TEST(TimerWheel, Second_DeLevel_Fire) {
 }
 
 // 第三级触发
-TEST(TimerWheel, ThirdFire) {
+TEST(TimerWheel, ThirdFire)
+{
   TimerWheel<HeapAlloc> wheel;
   bool fired = false;
   Timer *t = wheel.add(20000, [&fired] { fired = true; });
