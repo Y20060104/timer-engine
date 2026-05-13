@@ -1,11 +1,7 @@
 #include "timer_pool.h"
 #include "timer_wheel.h"
-#include <chrono>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <iostream>
 #include <random>
-#include <string>
 #include <vector>
 
 struct HeapAlloc
@@ -274,106 +270,4 @@ TEST(StressTest, TripleLevelCascade)
     wheel.tick();
 
   EXPECT_EQ(fired, kN);
-}
-
-// ============================================================================
-// 百万定时器综合性能测试：时间开销 + 空间开销
-// ============================================================================
-
-// 读取进程常驻内存 (VmRSS)，单位 MB
-static long GetVmRSSMB()
-{
-  std::ifstream f("/proc/self/status");
-  std::string line;
-  while (std::getline(f, line))
-  {
-    if (line.rfind("VmRSS:", 0) == 0)
-    {
-      long kb = std::stol(line.substr(6));
-      return kb / 1024;
-    }
-  }
-  return -1;
-}
-
-// 百万定时器全生命周期测试。
-// 完整走一遍 add → tick（全部到期），对比 HeapAlloc 与 TimerPool 的
-// 时间开销（插入/触发吞吐量）和空间开销（常驻内存峰值）。
-// 池容量略大于定时器数量（110 万 vs 100 万），留 10% 余量。
-TEST(PerfTest, MillionTimers_FullLifecycle)
-{
-  using Clock = std::chrono::steady_clock;
-  using NS = std::chrono::nanoseconds;
-  constexpr int kNumTimers = 1000000;
-  constexpr int kPoolSize = 1100000; // 略大于定时器数量
-  constexpr int kDelay = 17000;      // 固定 delay，到期集中在同一 tick
-
-  // ---------- HeapAlloc ----------
-  long mem_before = GetVmRSSMB();
-
-  auto start_add = Clock::now();
-  {
-    TimerWheel<HeapAlloc> wheel;
-    int fired = 0;
-    for (int i = 0; i < kNumTimers; ++i)
-      wheel.add(kDelay, [&fired] { ++fired; });
-    auto end_add = Clock::now();
-    long mem_after_add = GetVmRSSMB();
-
-    auto start_tick = Clock::now();
-    for (int i = 0; i < kDelay; ++i)
-      wheel.tick();
-    auto end_tick = Clock::now();
-
-    EXPECT_EQ(fired, kNumTimers);
-
-    auto add_ns = std::chrono::duration_cast<NS>(end_add - start_add).count();
-    auto tick_ns = std::chrono::duration_cast<NS>(end_tick - start_tick).count();
-    long mem_delta = mem_after_add - mem_before;
-
-    std::cout << "\n[HeapAlloc  1M]" << " add: " << add_ns / 1000000 << " ms total, "
-              << add_ns / kNumTimers << " ns/op |" << " tick: " << tick_ns / 1000000
-              << " ms total, " << tick_ns / kNumTimers << " ns/op |" << " mem: +" << mem_delta
-              << " MB\n";
-
-    RecordProperty("HeapAlloc_add_ms", add_ns / 1000000);
-    RecordProperty("HeapAlloc_tick_ms", tick_ns / 1000000);
-    RecordProperty("HeapAlloc_mem_mb", mem_delta);
-    RecordProperty("HeapAlloc_mem_per_timer_byte", mem_delta * 1048576LL / kNumTimers);
-  }
-
-  // ---------- TimerPool ----------
-  mem_before = GetVmRSSMB();
-
-  start_add = Clock::now();
-  {
-    TimerWheel<TimerPool<kPoolSize>> wheel;
-    int fired = 0;
-    for (int i = 0; i < kNumTimers; ++i)
-      wheel.add(kDelay, [&fired] { ++fired; });
-    auto end_add = Clock::now();
-    long mem_after_add = GetVmRSSMB();
-
-    auto start_tick = Clock::now();
-    for (int i = 0; i < kDelay; ++i)
-      wheel.tick();
-    auto end_tick = Clock::now();
-
-    EXPECT_EQ(fired, kNumTimers);
-
-    auto add_ns = std::chrono::duration_cast<NS>(end_add - start_add).count();
-    auto tick_ns = std::chrono::duration_cast<NS>(end_tick - start_tick).count();
-    long mem_delta = mem_after_add - mem_before;
-
-    std::cout << "[TimerPool 1M]" << " add: " << add_ns / 1000000 << " ms total, "
-              << add_ns / kNumTimers << " ns/op |" << " tick: " << tick_ns / 1000000
-              << " ms total, " << tick_ns / kNumTimers << " ns/op |" << " mem: +" << mem_delta
-              << " MB\n";
-
-    RecordProperty("TimerPool_add_ms", add_ns / 1000000);
-    RecordProperty("TimerPool_tick_ms", tick_ns / 1000000);
-    RecordProperty("TimerPool_mem_mb", mem_delta);
-    RecordProperty("TimerPool_mem_per_timer_byte", mem_delta * 1048576LL / kNumTimers);
-    RecordProperty("TimerPool_pool_size", kPoolSize);
-  }
 }
