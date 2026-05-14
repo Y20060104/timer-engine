@@ -83,6 +83,19 @@ TEST(TimerWheel, ThirdFire)
   EXPECT_TRUE(fired);
 }
 
+// current_ticks初始不为0测试
+TEST(TimerWheel,ProcessingTick)
+{
+  TimerWheel<HeapAlloc> wheel;
+  bool fired=false;
+  for (int i = 0; i < 1000; ++i)
+    wheel.tick();
+  Timer *t=wheel.add(5,[&fired]{fired=true;});
+  for (int i = 0; i < 5; ++i)
+    wheel.tick();
+  EXPECT_TRUE(fired);
+}
+
 // ============================================================================
 // 上行突发（压力测试）：模拟服务器上线后可能遇到的极端场景
 // ============================================================================
