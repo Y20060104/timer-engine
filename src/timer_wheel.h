@@ -51,16 +51,16 @@ Timer *TimerWheel<Alloc>::add(uint64_t delay_ticks, std::function<void()> cb)
   Timer *new_timer = alloc_.allocate();
   *new_timer = {nullptr, nullptr, expected_time, cb, false};
 
-  if (expected_time < 256)
+  if (delay_ticks < 256)
   {
     // 插入第一级
     insert(slots_l1, expected_time & SLOTS_LEVEL1_MASK, new_timer);
   }
-  else if (expected_time < 256 * 64)
+  else if (delay_ticks < 256 * 64)
   {
     insert(slots_l2, (expected_time >> 8) & SLOTS_LEVEL2_MASK, new_timer);
   }
-  else if (expected_time >= 256 * 64)
+  else if (delay_ticks >= 256 * 64)
   {
     insert(slots_l3, (expected_time >> 14) & SLOTS_LEVEL3_MASK, new_timer);
   }
